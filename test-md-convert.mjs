@@ -70,6 +70,20 @@ chunks.push([
 ]);
 
 chunks.push([
+  '公式 alt 里含 > 时不被截断',
+  '<p>得</p><p><img eeimg="2" src="https://www.zhihu.com/equation?tex=%5Cboxed%7Bx%7D" alt="\boxed{x} (|t|>1)"/></p>',
+  (md) => {
+    // 公式应以块级形式单独出现一次
+    assert.ok(md.includes('\\boxed{x}'), '公式内容应以 LaTeX 出现');
+    assert.strictEqual((md.match(/\$\$/g) || []).length, 2, '应只有一对 $$');
+    // 关键：不能出现二次转义残留（双反斜杠 \boxed）
+    const DOUBLE_BS = String.fromCharCode(92, 92);
+    assert.ok(!md.includes(DOUBLE_BS + 'boxed'), '公式内容不应被重复转义');
+    assert.strictEqual((md.match(/\$\$/g) || []).length, 2, '应只有一对 $$');
+  },
+]);
+
+chunks.push([
   '图片收集忽略算式图',
   '<p><img eeimg="1" src="https://www.zhihu.com/equation?tex=a"><img data-original="https://pic1.zhimg.com/v2-c.jpg"></p>',
   (_md, html) => {

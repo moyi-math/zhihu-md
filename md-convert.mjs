@@ -57,9 +57,16 @@ function decodeTex(raw) {
   return tex;
 }
 
+/** 协议相对地址 //pic1.zhimg.com/... 补成 https:// */
+function normalizeUrl(u) {
+  const v = String(u || '').trim();
+  if (v.startsWith('//')) return `https:${v}`;
+  return v;
+}
+
 export function collectImages(html) {
   const images = [];
-  const re = /<img\b[^>]*>/gi;
+  const re = /<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi;
   let m;
   while ((m = re.exec(html || ''))) {
     const tag = m[0];
@@ -68,10 +75,10 @@ export function collectImages(html) {
     const aliases = ['data-original', 'data-actualsrc', 'src']
       .map((name) => attr(tag, name))
       .filter(Boolean)
-      .map(unescapeEntities);
+      .map((v) => normalizeUrl(unescapeEntities(v)));
     images.push({
       tag,
-      url: unescapeEntities(src),
+      url: normalizeUrl(unescapeEntities(src)),
       caption: unescapeEntities(attr(tag, 'data-caption') || attr(tag, 'alt')),
       aliases: [...new Set(aliases)],
     });
@@ -100,7 +107,7 @@ export function preprocess(html) {
   );
 
   // 知乎公式 <img eeimg="1|2" src=".../equation?tex=...">
-  h = h.replace(/<img\b[^>]*>/gi, (tag) => {
+  h = h.replace(/<img\b(?:[^>"']|"[^"]*"|'[^']*')*>/gi, (tag) => {
     const src = unescapeEntities(attr(tag, 'src'));
     const isEquation = /\/equation\?/.test(src);
     const texAttr = attr(tag, 'data-tex') || attr(tag, 'data-formula') || attr(tag, 'alt');
@@ -124,9 +131,12 @@ export function preprocess(html) {
 
   // 新版公式 <span class="ztext-math" data-tex="...">（服务端渲染通常为空）
   h = h.replace(
-    /<span\b[^>]*class="[^"]*ztext-math[^"]*"[^>]*>[\s\S]*?<\/span>/gi,
+    // 非贪婪：服务端渲染的 ztext-math 内部为空，贪婪匹配会吞掉后面所有内容
+    /<span\b(?:[^>"']|"[^"]*"|'[^']*')*class="[^"]*ztext-math[^"]*"(?:[^>"']|"[^"]*"|'[^']*')*>[\s\S]*?<\/span>/gi,
     (whole) => {
-      const open = whole.slice(0, whole.indexOf('>') + 1);
+      // 开始标签也要按引号解析：data-tex 里可能有 >（例如 |t|>1）
+      const openMatch = whole.match(/^<span\b(?:[^>"']|"[^"]*"|'[^']*')*>/);
+      const open = openMatch ? openMatch[0] : whole.slice(0, whole.indexOf('>') + 1);
       const tex = attr(open, 'data-tex');
       if (!tex) return whole;
       const display = attr(open, 'data-eeimg') === '2';
@@ -184,11 +194,12 @@ function createTurndown() {
     filter: 'img',
     replacement: (_c, node) => {
       // 知乎正文图常见 src="data:image/svg+xml..." 占位，真实地址在 data-original
-      const src =
+      const raw =
         node.getAttribute('data-original') ||
         node.getAttribute('data-actualsrc') ||
         node.getAttribute('src') ||
         '';
+      const src = normalizeUrl(raw);
       if (!src || src.startsWith('data:')) return '';
       const alt = (node.getAttribute('alt') || node.getAttribute('data-caption') || '').replace(/[[\]]/g, '');
       const title = node.getAttribute('title') || '';
@@ -223,6 +234,13 @@ export function htmlToMarkdown(html) {
   resetMath();
   const body = preprocess(html);
   let md = createTurndown().turndown(body);
+  // 把正文里的字面 $ 转义成 \$（此时公式还是占位符，不会被误伤），
+  // 否则下游渲染器会把「运费 $100，原价 $120」当成行内公式。
+  // 代码段里的 $ 不转义：代码内容不经过 markdown 转义，加了反斜杠反而会显示出来。
+  md = md
+    .split(/(```[\s\S]*?```|`[^`\n]*`)/g)
+    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\$/g, '\\$')))
+    .join('');
   md = md
     .replace(new RegExp(`${MATH_OPEN}(\\d+)${MATH_CLOSE}`, 'g'), (_m, i) => mathStore[Number(i)] ?? '')
     .replace(/[ \t]+$/gm, '')

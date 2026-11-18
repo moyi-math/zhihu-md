@@ -28,3 +28,42 @@ jobs:
       - name: 语法检查
         run: |
           for f in *.mjs; do node --check "$f" || exit 1; done
+
+  # 打包路径只在 Windows 上能验证：pkg 的 snapshot 有独立于源码的坑
+  # （动态 import() 不可用、CJS default 导入变 undefined、KaTeX 字体读不到），
+  # 这个 job 能在 PR 阶段就把它们拦住，而不是等打 tag 才发现 exe 坏了。
+  package:
+    name: 打包产物冒烟
+    runs-on: windows-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 打包 exe
+        run: npm run build
+
+      - name: 冒烟：--help 能跑起来（验证 snapshot 里模块加载正常）
+        shell: pwsh
+        run: |
+          $out = & "dist/zhihu-md.exe" --help 2>&1 | Out-String
+          Write-Output $out
+          if ($LASTEXITCODE -ne 0) { throw "exe --help 退出码 $LASTEXITCODE" }
+          if ($out -notmatch '知乎回答导出') { throw "--help 输出异常" }
+
+      - name: 冒烟：UI 资源与 KaTeX 样式已打进产物
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/zhihu-md.exe")) { throw "没有生成 exe" }
+          $size = (Get-Item "dist/zhihu-md.exe").Length
+          if ($size -lt 30MB) { throw "exe 体积异常：$size" }
+          if (-not (Test-Path "dist/zhihu-md-launcher.vbs")) { throw "缺少启动器" }
+          Write-Output "exe $([math]::Round($size/1MB,1)) MB"

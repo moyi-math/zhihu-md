@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { findBrowser } from './browser.mjs';
 
@@ -88,25 +88,40 @@ export async function markdownToPdf(mdPath, outPdf, { onLog = () => { } } = {}) 
     md = md.slice(fm[0].length);
   }
 
-  // 公式保护
+  // 1) 先把代码段（围栏块与行内代码）保护起来：里面的 $ 不是公式
+  const codeStore = [];
+  let text = md.replace(/(```[\s\S]*?```|~~~[\s\S]*?~~~|`[^`\n]*`)/g, (seg) => {
+    codeStore.push(seg);
+    return `CODEPLACEHOLDERX${codeStore.length - 1}XEND`;
+  });
+
+  // 2) 公式保护：只认未被转义的 $（zhihu-md 会把正文里的字面 $ 写成 \$）
   const mathStore = [];
-  let text = md.replace(/\$\$\r?\n([\s\S]*?)\r?\n\$\$/g, (_w, tex) => {
+  text = text.replace(/(?<!\\)\$\$\r?\n([\s\S]*?)\r?\n(?<!\\)\$\$/g, (_w, tex) => {
     mathStore.push({ tex, display: true });
     return `MATHBLOCKX${mathStore.length - 1}XEND`;
   });
-  text = text.replace(/\$\$([\s\S]*?)\$\$/g, (_w, tex) => {
+  text = text.replace(/(?<!\\)\$\$([\s\S]*?)(?<!\\)\$\$/g, (_w, tex) => {
     mathStore.push({ tex, display: true });
     return `MATHBLOCKX${mathStore.length - 1}XEND`;
   });
-  text = text.replace(/\$([^$\n]+)\$/g, (_w, tex) => {
+  text = text.replace(/(?<!\\)\$([^$\n]+?)(?<!\\)\$/g, (_w, tex) => {
     mathStore.push({ tex, display: false });
     return `MATHINLINEX${mathStore.length - 1}XEND`;
   });
 
+  // 3) 还原代码段（在 markdown-it 渲染前，保证代码块仍按代码块渲染）
+  text = text.replace(/CODEPLACEHOLDERX(\d+)XEND/g, (_m, i) => codeStore[Number(i)] ?? '');
+
   // 图片内嵌（PDF 自包含）
   const missing = [];
   text = text.replace(/(!\[[^\]]*\]\()([^)\s]+)([^)]*\))/g, (whole, pre, url, post) => {
-    if (/^(https?:|data:)/.test(url)) return whole;
+    if (/^https?:/.test(url)) {
+      // 远端图（多半是下载失败的）PDF 里会因防盗链变成破图，必须记进缺失
+      missing.push(url);
+      return whole;
+    }
+    if (/^data:/.test(url)) return whole;
     try {
       const file = path.resolve(mdDir, decodeURI(url));
       const buf = fs.readFileSync(file);
@@ -149,6 +164,7 @@ export async function markdownToPdf(mdPath, outPdf, { onLog = () => { } } = {}) 
       const katexDist = path.dirname(requireCjs.resolve('katex'));
       katexCss = await fsp.readFile(path.join(katexDist, 'katex.min.css'), 'utf8');
       katexCss = katexCss.replace(/url\(fonts\//g, `url(${toFileUrl(path.join(katexDist, 'fonts'))}/`);
+      onLog('  ! 未找到内联字体样式（katex-inline.css），PDF 公式字体可能不正确');
     } catch {
       onLog('  ! KaTeX 样式未加载，公式会退化为纯文本');
     }
@@ -171,15 +187,16 @@ ${metaHtml}${body}</body></html>`;
   const found = findBrowser();
   if (!found) throw new Error('没找到 Chrome / Edge，无法生成 PDF');
 
-  const browser = await puppeteer.launch({
-    executablePath: found.path,
-    headless: true,
-    args: ['--no-first-run', '--no-default-browser-check'],
-    protocolTimeout: 120000,
-  });
+  let browser = null;
   try {
+    browser = await puppeteer.launch({
+      executablePath: found.path,
+      headless: true,
+      args: ['--no-first-run', '--no-default-browser-check'],
+      protocolTimeout: 120000,
+    });
     const page = await browser.newPage();
-    await page.goto(`file:///${htmlPath.replace(/\\/g, '/')}`, { waitUntil: 'load', timeout: 60000 });
+    await page.goto(pathToFileURL(htmlPath).href, { waitUntil: 'load', timeout: 60000 });
     await new Promise((r) => setTimeout(r, 1200));
 
     await page.pdf({
@@ -195,13 +212,16 @@ ${metaHtml}${body}</body></html>`;
         '<span><span class="pageNumber"></span> / <span class="totalPages"></span></span></div>',
     });
   } finally {
-    await browser.close().catch(() => { });
+    if (browser) await browser.close().catch(() => { });
     await fsp.unlink(htmlPath).catch(() => { });
   }
 
   const size = (await fsp.stat(pdfAbs)).size;
   onLog(`  PDF：${pdfAbs}（${(size / 1024).toFixed(0)} KB，公式 ${mathStore.filter((m) => m.display).length} 块）`);
-  if (missing.length) onLog(`  ! ${missing.length} 张图片缺失`);
+  if (missing.length) {
+    onLog(`  ! ${missing.length} 张图片缺失（PDF 中会显示为破图）`);
+    for (const u of missing.slice(0, 3)) onLog(`    - ${u.slice(0, 100)}`);
+  }
 
   return { pdfPath: pdfAbs, size };
 }

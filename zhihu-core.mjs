@@ -41,6 +41,8 @@ function normalizeAnswer(raw) {
   const id = raw.id != null ? String(raw.id) : (raw.url || '').match(/answer\/(\d+)/)?.[1];
   const content = raw.content ?? raw.excerpt ?? '';
   if (!id || !content) return null;
+  // 只有 excerpt 没有 content：受限/折叠回答，标注出来避免被当成完整正文
+  const onlyExcerpt = !raw.content && !!raw.excerpt;
   const author = raw.author || {};
   return {
     id,
@@ -49,6 +51,7 @@ function normalizeAnswer(raw) {
     comments: raw.comment_count ?? raw.commentCount ?? 0,
     created: raw.created_time ?? raw.createdTime ?? 0,
     updated: raw.updated_time ?? raw.updatedTime ?? 0,
+    truncated: onlyExcerpt,
     author: {
       name: author.name || '匿名用户',
       headline: (author.headline || '').trim(),
@@ -147,12 +150,14 @@ const READ_DOM_SCRIPT = `(() => {
     } catch (e) { zop = {}; }
     var rich = el.querySelector('.RichText');
     var voteEl = el.querySelector('.VoteButton--up');
-    var vote = ((voteEl && voteEl.innerText) || '').replace(/[^0-9]/g, '');
+    var voteText = ((voteEl && voteEl.innerText) || '').trim();
+    var vm = voteText.match(/([0-9]+(?:\.[0-9]+)?)\s*(万|千)?/);
+    var voteNum = vm ? parseFloat(vm[1]) * (vm[2] === '万' ? 1e4 : vm[2] === '千' ? 1e3 : 1) : 0;
     var nameEl = el.querySelector('.AuthorInfo-name');
     return {
       id: zop.itemId ? String(zop.itemId) : '',
       content: (rich && rich.innerHTML) || '',
-      voteupCount: Number(vote) || 0,
+      voteupCount: Math.round(voteNum) || 0,
       author: { name: (nameEl && nameEl.innerText && nameEl.innerText.trim()) || '匿名用户' },
       created_time: 0,
       updated_time: 0,
@@ -169,20 +174,38 @@ async function readAnswersFromDom(page) {
 
 export async function crawlQuestion(page, qid, { order = 'default', limit = 0, maxScroll = 500, onLog = () => { } } = {}) {
   const store = new Map();
-  const state = { isEnd: false, question: null, apiPages: 0 };
+  const state = { isEnd: false, question: null, apiPages: 0, apiFails: 0 };
   const inflight = [];
 
-  const absorb = (list) => {
+  /**
+   * 合并回答。
+   *
+   * 优先级：SSR / 接口（干净的服务端 HTML）> DOM 兜底（浏览器渲染后的 DOM）。
+   * DOM 版的 innerHTML 里含 MathJax 生成的嵌套标签，长度总是更大，但质量差得多
+   * （公式会被残留渲染标签污染、时间/评论数/作者 token 也缺失），所以绝不能
+   * 用「更长就覆盖」的策略；它只用来补 SSR/接口完全没拿到的回答。
+   */
+  const absorb = (list, { dom = false } = {}) => {
     for (const raw of list || []) {
       const a = normalizeAnswer(raw);
       if (!a) continue;
       const old = store.get(a.id);
-      if (!old || a.content.length > old.content.length) store.set(a.id, a);
+      if (!old) {
+        store.set(a.id, a);
+        continue;
+      }
+      if (dom) continue; // DOM 版本永不覆盖已有数据
+      // 已有的只是摘要（受限回答），服务端给了完整 content 才升级
+      if (old.truncated && a.content.length > old.content.length) {
+        store.set(a.id, { ...old, content: a.content, truncated: false });
+      }
     }
   };
 
-  page.on('response', (res) => {
-    if (!/\/api\/v4\/questions\/\d+\/answers/.test(res.url())) return;
+  // 只接受本问题的分页响应：页面预取/推荐会带入他题的 /answers
+  const answersUrlRe = new RegExp(`/questions/${qid}/answers`);
+  const onResponse = (res) => {
+    if (!answersUrlRe.test(res.url())) return;
     const p = res
       .json()
       .then((j) => {
@@ -190,91 +213,110 @@ export async function crawlQuestion(page, qid, { order = 'default', limit = 0, m
         absorb(j?.data);
         if (j?.paging?.is_end) state.isEnd = true;
       })
-      .catch(() => { });
+      .catch(() => {
+        state.apiFails += 1;
+        if (state.apiFails === 1) onLog('  ! 接口响应无法解析（可能被限流），已退化为页面提取');
+      });
     inflight.push(p);
-  });
-
-  const sortQuery = order === 'updated' ? '?sort=updated' : order === 'created' ? '?sort=created' : '';
-  const url = `https://www.zhihu.com/question/${qid}${sortQuery}`;
-  onLog(`→ 打开 ${url}`);
-  await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+  };
+  page.on('response', onResponse);
 
   try {
-    await page.waitForSelector('.AnswerItem, .QuestionRichText, h1', { timeout: 20000 });
-  } catch { /* 继续 */ }
-  await sleep(1500);
+    const sortQuery = order === 'updated' ? '?sort=updated' : order === 'created' ? '?sort=created' : '';
+    const url = `https://www.zhihu.com/question/${qid}${sortQuery}`;
+    onLog(`→ 打开 ${url}`);
+    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
-  const ssr = await readInitialData(page, qid);
-  if (ssr) {
-    state.question = ssr.question;
-    absorb(ssr.answers);
-    if (ssr.question?.title) onLog(`  标题：${ssr.question.title}`);
-    const cnt = ssr.question?.answerCount ?? ssr.question?.answer_count;
-    if (cnt != null) onLog(`  共 ${cnt} 个回答，首屏 ${ssr.idCount} 条`);
-  }
+    try {
+      await page.waitForSelector('.AnswerItem, .QuestionRichText, h1', { timeout: 20000 });
+    } catch { /* 继续，后面统一判断 */ }
+    await sleep(1500);
 
-  const declaredTotal = state.question?.answerCount ?? state.question?.answer_count ?? null;
-  onLog(`→ 滚动加载全部回答${declaredTotal != null ? `（目标 ${declaredTotal} 条）` : ''}`);
-  let idle = 0;
-  let scrolls = 0;
-  let progress = store.size;
-
-  while (!state.isEnd && scrolls < maxScroll) {
-    if (limit && store.size >= limit) break;
-    if (declaredTotal != null && progress >= declaredTotal) break;
-
-    await page.evaluate('window.scrollTo(0, document.body.scrollHeight); window.scrollBy(0, -300);');
-    await sleep(1200 + Math.random() * 700);
-    await Promise.all(inflight.splice(0));
-
-    const domCount = await page
-      .evaluate("document.querySelectorAll('.AnswerItem').length")
-      .catch(() => 0);
-    const now = Math.max(store.size, domCount);
-    scrolls++;
-    onLog(`  已渲染 ${domCount} 条 / 已提取 ${store.size} 条（滚动 ${scrolls} 次）`);
-
-    if (now > progress) {
-      progress = now;
-      idle = 0;
+    const ssr = await readInitialData(page, qid);
+    if (ssr) {
+      state.question = ssr.question;
+      absorb(ssr.answers);
+      if (ssr.question?.title) onLog(`  标题：${ssr.question.title}`);
+      const cnt = ssr.question?.answerCount ?? ssr.question?.answer_count;
+      if (cnt != null) onLog(`  共 ${cnt} 个回答，首屏 ${ssr.idCount} 条`);
+      if (ssr.blocked) {
+        onLog('  ! 页面未包含问题数据：可能被风控 / 问题已删除 / 无访问权限');
+      }
     } else {
-      idle++;
+      onLog('  ! 页面没有 SSR 数据（可能被风控或不是问题页）');
     }
-    if (idle >= 6) break;
-  }
-  await Promise.all(inflight);
 
-  if (!store.size) {
-    onLog('→ 接口与 SSR 均无数据，改用 DOM 提取……');
-    absorb(await readAnswersFromDom(page));
-  } else {
+    const declaredTotal = state.question?.answerCount ?? state.question?.answer_count ?? null;
+    onLog(`→ 滚动加载全部回答${declaredTotal != null ? `（目标 ${declaredTotal} 条）` : ''}`);
+
+    let idle = 0;
+    let scrolls = 0;
+    let progress = store.size;
+
+    while (!state.isEnd && scrolls < maxScroll) {
+      if (limit && store.size >= limit) break;
+      if (declaredTotal != null && progress >= declaredTotal) break;
+
+      await page.evaluate('window.scrollTo(0, document.body.scrollHeight); window.scrollBy(0, -300);');
+      await sleep(1200 + Math.random() * 700);
+      await Promise.all(inflight.splice(0));
+
+      // 收窄作用域：只数回答列表里的卡片，避免混入侧栏推荐
+      const domCount = await page
+        .evaluate("document.querySelectorAll('.QuestionAnswerList .AnswerItem, .List-item .AnswerItem').length || document.querySelectorAll('.AnswerItem').length")
+        .catch(() => 0);
+      const now = Math.max(store.size, domCount);
+      scrolls++;
+      onLog(`  已渲染 ${domCount} 条 / 已提取 ${store.size} 条（滚动 ${scrolls} 次）`);
+
+      if (now > progress) {
+        progress = now;
+        idle = 0;
+      } else {
+        idle++;
+      }
+      if (idle >= 6) break;
+    }
+    await Promise.all(inflight);
+
+    // DOM 兜底：按 id 合并（幂等），不再比较数量
     const domAnswers = await readAnswersFromDom(page);
-    if (domAnswers.length > store.size) absorb(domAnswers);
+    if (domAnswers.length) {
+      if (!store.size) onLog('→ 接口与 SSR 均无数据，改用 DOM 提取……');
+      absorb(domAnswers, { dom: true });
+    }
+
+    if (!state.question) {
+      const again = await readInitialData(page, qid).catch(() => null);
+      state.question = again?.question ?? null;
+    }
+
+    if (state.apiPages || state.apiFails) {
+      onLog(`  接口：成功 ${state.apiPages} 页${state.apiFails ? ` / 失败 ${state.apiFails} 次` : ''}`);
+    }
+
+    const all = [...store.values()].sort((a, b) => b.voteup - a.voteup);
+    const collapsedCount = state.question?.collapsedAnswerCount ?? state.question?.collapsed_answer_count ?? 0;
+    const covered = declaredTotal == null || declaredTotal - all.length <= collapsedCount;
+    const isEnd = state.isEnd || covered;
+
+    if (!all.length) {
+      throw new Error(
+        `没有抓到任何回答（页面：${page.url()}）。可能原因：登录态失效、被知乎限流、问题已删除、或该问题确实没有回答。`
+      );
+    }
+
+    return {
+      question: normalizeQuestion(state.question, qid),
+      answers: limit ? all.slice(0, limit) : all,
+      isEnd,
+      declaredTotal,
+      collapsedCount,
+      limited: limit > 0,
+    };
+  } finally {
+    page.off('response', onResponse);
   }
-
-  if (!state.question) {
-    const again = await readInitialData(page, qid).catch(() => null);
-    state.question = again?.question ?? null;
-  }
-
-  const all = [...store.values()].sort((a, b) => b.voteup - a.voteup);
-  const collapsedCount = state.question?.collapsedAnswerCount ?? state.question?.collapsed_answer_count ?? 0;
-  const covered = declaredTotal == null || declaredTotal - all.length <= collapsedCount;
-  const isEnd = state.isEnd || covered;
-
-  if (!all.length) {
-    throw new Error(
-      '没有抓到任何回答。可能原因：登录态失效、被知乎临时限流、或该问题确实没有回答。'
-    );
-  }
-
-  return {
-    question: normalizeQuestion(state.question, qid),
-    answers: limit ? all.slice(0, limit) : all,
-    isEnd,
-    declaredTotal,
-    collapsedCount,
-  };
 }
 
 /* ------------------------------------------------------------------ 图片 */
@@ -352,7 +394,7 @@ function rewriteImageUrls(md, imgMap) {
   });
 }
 
-export function buildMarkdown({ question, answers, url, qid, fetchedAt, truncated, declaredTotal, collapsedCount, withImages }) {
+export function buildMarkdown({ question, answers, url, qid, fetchedAt, truncated, declaredTotal, collapsedCount, withImages, limited }) {
   const title = (question.title || `知乎问题 ${qid}`).trim();
   const L = [];
 
@@ -395,7 +437,10 @@ export function buildMarkdown({ question, answers, url, qid, fetchedAt, truncate
     L.push(`> 回答链接: <https://www.zhihu.com/question/${qid}/answer/${a.id}>`);
     if (a.author.token) L.push(`> 作者主页: <https://www.zhihu.com/people/${a.author.token}>`);
     L.push('');
-    L.push(htmlToMarkdown(a.content) || '_（该回答无正文，可能是纯图片或视频）_', '');
+    const body = htmlToMarkdown(a.content) || '_（该回答无正文，可能是纯图片或视频）_';
+    L.push(a.truncated ? `${body}
+
+> ⚠️ 该回答只抓到摘要（正文需登录或已被折叠）。` : body, '');
     L.push('---', '');
   });
 
@@ -405,6 +450,9 @@ export function buildMarkdown({ question, answers, url, qid, fetchedAt, truncate
         ? `（知乎显示共 ${declaredTotal} 条${collapsedCount ? `，其中 ${collapsedCount} 条已被折叠` : ''}）`
         : '';
     L.push(`> ⚠️ 本次抓到 ${answers.length} 条回答${gap}；若认为有遗漏，可稍后重跑。`, '');
+  }
+  if (limited) {
+    L.push(`> 注：本次通过 --limit 只抓取了前 ${answers.length} 条（知乎默认排序），并非全量。`, '');
   }
   if (!withImages) {
     L.push('_注：本次未下载图片，图片链接直接指向知乎，可能因防盗链无法显示。_', '');
@@ -442,6 +490,7 @@ export async function exportQuestion({
   const assetsDir = path.join(path.resolve(outDir), assetsRel);
 
   let imgMap = new Map();
+  let downloadedCount = 0; // 本次真正下载成功的图片数（imgMap 里还有同一张图的别名键）
   if (images) {
     const imgs = [
       ...answers.flatMap((a) => collectImages(a.content)),
@@ -454,6 +503,7 @@ export async function exportQuestion({
       userAgent: session.ua,
       onLog,
     });
+    downloadedCount = downloaded.size;
     for (const img of imgs) {
       const local = downloaded.get(img.url);
       if (!local) continue;
@@ -473,18 +523,30 @@ export async function exportQuestion({
     declaredTotal,
     collapsedCount,
     withImages: images,
+    limited: result.limited,
   });
   const markdown = imgMap.size ? rewriteImageUrls(built.markdown, imgMap) : built.markdown;
 
   const outFile = path.join(path.resolve(outDir), `${sanitizeFilename(built.title)}.md`);
   await fsp.writeFile(outFile, markdown, 'utf8');
 
-  const imgCount = images && fs.existsSync(assetsDir) ? (await fsp.readdir(assetsDir)).length : 0;
+  const imgCount = downloadedCount;
   onLog('');
   onLog('✅ 抓取完成');
   onLog(`  文件：${outFile}`);
   onLog(`  回答：${answers.length} 条 · 正文 ${markdown.length} 字符${isEnd ? '' : '（未抓到底）'}`);
   if (imgCount) onLog(`  图片：${imgCount} 张 → ${assetsDir}`);
+
+  // 给 GUI 用的提示（md 里也写了，但界面需要能直接显示）
+  const notes = [];
+  if (!isEnd) {
+    notes.push(
+      declaredTotal && declaredTotal > answers.length
+        ? `未抓全：知乎显示 ${declaredTotal} 条${collapsedCount ? `（其中 ${collapsedCount} 条已折叠）` : ''}，实际抓到 ${answers.length} 条`
+        : `未抓全：实际抓到 ${answers.length} 条`
+    );
+  }
+  if (result.limited) notes.push(`已按 --limit 限制为前 ${answers.length} 条`);
 
   return {
     title: built.title,
@@ -493,6 +555,7 @@ export async function exportQuestion({
     imgCount,
     answers: answers.length,
     chars: markdown.length,
+    note: notes.join('；'),
     question,
   };
 }

@@ -3,7 +3,6 @@ name: Release
 on:
   push:
     tags: ['v*']
-  workflow_dispatch:
 
 permissions:
   contents: write
@@ -27,6 +26,17 @@ jobs:
       - name: 单测
         run: npm test
 
+      # 防止打了 tag 却忘了改 package.json（会让 /api/config 报错版本、用户下载到同名不同版的 exe）
+      - name: 校验 tag 与 package.json 版本一致
+        shell: pwsh
+        run: |
+          $pkgVersion = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $tag = "$env:GITHUB_REF_NAME".TrimStart('v')
+          Write-Output "tag=$tag package=$pkgVersion"
+          if ($tag -ne $pkgVersion) {
+            throw "tag ($tag) 与 package.json ($pkgVersion) 版本不一致，请先改 package.json"
+          }
+
       - name: 打包 exe
         run: npm run build
 
@@ -49,6 +59,7 @@ jobs:
       - name: 发布到 Releases
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.ref_name }}
           files: |
             release/zhihu-md.exe
             release/zhihu-md-launcher.vbs
@@ -59,6 +70,7 @@ jobs:
 
             - `zhihu-md.exe` —— 单文件客户端，双击即用（需本机已安装 Chrome 或 Edge）
             - `zhihu-md-launcher.vbs` —— 放在 exe 同目录，双击可隐藏命令行窗口
+            - `SHA256SUMS.txt` —— 校验和
 
             ## 用法
 

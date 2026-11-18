@@ -32,6 +32,21 @@ export const HELP = `
 不带任何参数运行则打开图形界面。
 `;
 
+/** 取下一个参数值：缺失或以 - 开头都视为错误，避免 --out 后面没写导致 path.resolve(undefined) */
+function takeValue(argv, i, name) {
+  const v = argv[i + 1];
+  if (v === undefined || (name !== '--limit' && v.startsWith('-'))) {
+    throw new Error(`${name} 缺少取值`);
+  }
+  return v;
+}
+
+function parseIntArg(raw, name, { min = 0 } = {}) {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < min) throw new Error(`${name} 需要 >= ${min} 的整数，收到：${raw}`);
+  return n;
+}
+
 function parseArgs(argv) {
   const args = {
     input: null,
@@ -48,14 +63,14 @@ function parseArgs(argv) {
     const a = argv[i];
     switch (a) {
       case '-o':
-      case '--out': args.out = argv[++i]; break;
-      case '--order': args.order = argv[++i]; break;
-      case '--limit': args.limit = Number(argv[++i]) || 0; break;
+      case '--out': args.out = takeValue(argv, i, a); i++; break;
+      case '--order': args.order = takeValue(argv, i, a); i++; break;
+      case '--limit': args.limit = parseIntArg(takeValue(argv, i, a), a, { min: 0 }); i++; break;
       case '--no-images': args.images = false; break;
       case '--pdf': args.pdf = true; break;
       case '--headless': args.headless = true; break;
-      case '--profile': args.profile = argv[++i]; break;
-      case '--max-scroll': args.maxScroll = Number(argv[++i]) || 500; break;
+      case '--profile': args.profile = takeValue(argv, i, a); i++; break;
+      case '--max-scroll': args.maxScroll = parseIntArg(takeValue(argv, i, a), a, { min: 1 }); i++; break;
       case '-h':
       case '--help': console.log(HELP); process.exit(0); break;
       default:
@@ -74,7 +89,17 @@ function parseArgs(argv) {
 }
 
 export async function runCli(argv) {
-  const args = parseArgs(argv);
+  let args;
+  try {
+    args = parseArgs(argv);
+  } catch (err) {
+    console.error('');
+    console.error('✖ ' + err.message);
+    console.error('');
+    console.error('   用 --help 查看全部参数。');
+    console.error('');
+    process.exit(2);
+  }
   const log = (line) => console.log(line);
 
   const found = findBrowser();

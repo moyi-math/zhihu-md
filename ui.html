@@ -159,7 +159,7 @@
         </select>
       </label>
       <label class="opt">最多抓取
-        <input id="limit" type="number" min="1" placeholder="全部">
+        <input id="limit" type="number" min="0" placeholder="全部">
       </label>
       <label class="opt"><input id="images" type="checkbox" checked> 下载图片到本地</label>
       <label class="opt"><input id="pdf" type="checkbox" checked> 同时生成 PDF</label>
@@ -191,6 +191,9 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
+// 服务端启动时生成的一次性 token：所有请求必须带上，否则 403
+const TOKEN = new URLSearchParams(location.search).get('t') || '';
+const AUTH = TOKEN ? { 'x-zmd-token': TOKEN } : {};
 const term = $('term');
 const badge = $('badge');
 let running = false;
@@ -207,7 +210,7 @@ function appendLog(line) {
   const div = document.createElement('div');
   const t = String(line);
   if (/^✅|完成|✓ 登录成功|✓ 已复用/.test(t)) div.className = 't-ok';
-  else if (/^✖|失败|错误|!/.test(t)) div.className = 't-err';
+  else if (/^✖|^  ! |失败|错误/.test(t)) div.className = 't-err';
   else if (/^→|^(浏览器|  标题|  共|  文件|  回答|  图片|  PDF)/.test(t)) div.className = 't-info';
   else if (/^\s*$/.test(t)) div.className = 't-dim';
   div.textContent = t;
@@ -245,11 +248,11 @@ async function start() {
   try {
     const res = await fetch('/api/run', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...AUTH },
       body: JSON.stringify({
         url,
         order: $('order').value,
-        limit: Number($('limit').value) || 0,
+        limit: Math.max(0, Math.floor(Number($('limit').value) || 0)),
         images: $('images').checked,
         pdf: $('pdf').checked,
       }),
@@ -279,13 +282,15 @@ function showResult(r) {
 
 // SSE 进度
 function connect() {
-  const es = new EventSource('/api/events');
+  const es = new EventSource('/api/events?t=' + encodeURIComponent(TOKEN));
   es.onmessage = (ev) => {
     let m;
     try { m = JSON.parse(ev.data); } catch { return; }
     if (m.type === 'log') appendLog(m.line);
     else if (m.type === 'state') {
-      if (m.running) { setRunning(true); setBadge('抓取中', 'running'); }
+      // 重连后按服务端真实状态恢复：false 时也要解除按钮禁用
+      setRunning(!!m.running);
+      setBadge(m.running ? '抓取中' : '就绪', m.running ? 'running' : '');
     } else if (m.type === 'done') {
       setRunning(false);
       setBadge('完成', 'done');
@@ -303,7 +308,7 @@ function connect() {
 async function post(path, body) {
   const r = await fetch(path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...AUTH },
     body: JSON.stringify(body || {}),
   });
   return r.json();
@@ -320,16 +325,26 @@ $('makePdf').onclick = async () => {
   if (!last) return;
   $('makePdf').disabled = true;
   $('makePdf').textContent = '生成中…';
-  const r = await post('/api/pdf', { path: last.md });
-  $('makePdf').disabled = false;
-  $('makePdf').textContent = '生成 PDF';
-  if (r.ok) { last.pdf = r.pdf; $('openPdf').style.display = ''; $('makePdf').style.display = 'none'; }
-  else showErr(r.error || 'PDF 生成失败');
+  try {
+    const r = await post('/api/pdf', { path: last.md });
+    if (r.ok) {
+      last.pdf = r.pdf;
+      $('openPdf').style.display = '';
+      $('makePdf').style.display = 'none';
+    } else {
+      showErr(r.error || 'PDF 生成失败');
+    }
+  } catch (e) {
+    showErr('PDF 生成失败：' + (e.message || e));
+  } finally {
+    $('makePdf').disabled = false;
+    $('makePdf').textContent = '生成 PDF';
+  }
 };
 
 (async function init() {
   try {
-    const r = await fetch('/api/config').then((x) => x.json());
+    const r = await fetch('/api/config', { headers: AUTH }).then((x) => x.json());
     $('outdir').textContent = r.outDir;
     $('login').textContent = r.loggedIn ? '已登录' : '未登录（首次运行会提示扫码）';
     $('login').style.color = r.loggedIn ? 'var(--ok)' : 'var(--warn)';

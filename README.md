@@ -160,11 +160,20 @@ npm run build                                # 打包 → dist/zhihu-md.exe
 | `make-katex-css.mjs` | 构建期把 KaTeX 字体内联成 data URI |
 | `ui.html` | 图形界面（单文件，无框架） |
 | `build.mjs` | 打包成单文件 exe |
+| `test-md-convert.mjs` | 转换层单测（公式/图片/外链/标题/代码块/表格等 11 个用例）|
 | `.github/workflows/` | CI：push 跑单测；打 tag 自动构建 exe 并发布 Release |
 
 发版：`git tag v1.0.0 && git push --tags`，GitHub Actions 会自动构建 exe、生成 SHA256 并发布 Release。
 
 技术栈：Node.js 22+ / `puppeteer-core` / `turndown` / `markdown-it` / `katex` / `@yao-pkg/pkg`。
+
+## 安全模型
+
+GUI 是一个监听 `127.0.0.1` 随机端口的本地服务，所以做了三道限制，防止**本机其他网页**（例如被注入脚本的页面）驱动本程序：
+
+- 启动时生成一次性 token，页面地址带 `?t=<token>`；页面本身和所有 `/api/*` 都校验 token
+- 额外校验 `Host` 与 `Origin`，挡住 DNS rebinding 与跨站表单/fetch
+- `/api/open`、`/api/pdf` 只接受输出目录内的路径，且打开文件走 `explorer.exe`（ShellExecute 语义），不经过 `cmd.exe` 命令行解析
 
 ## 已知限制
 

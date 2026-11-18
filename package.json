@@ -1,6 +1,6 @@
 {
   "name": "zhihu-md",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "知乎问题回答导出为 Markdown / PDF 的桌面客户端",
   "type": "module",
   "bin": {
