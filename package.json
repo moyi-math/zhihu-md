@@ -1,0 +1,48 @@
+{
+  "name": "zhihu-md",
+  "version": "1.0.0",
+  "description": "知乎问题回答导出为 Markdown / PDF 的桌面客户端",
+  "type": "module",
+  "bin": {
+    "zhihu-md": "app.mjs"
+  },
+  "scripts": {
+    "gui": "node app.mjs",
+    "test": "node test-md-convert.mjs",
+    "build": "node build.mjs"
+  },
+  "pkg": {
+    "assets": [
+      "ui.html",
+      "package.json",
+      "node_modules/katex/dist/katex.min.css",
+      "katex-inline.css"
+    ],
+    "scripts": [
+      "app.mjs",
+      "cli.mjs",
+      "browser.mjs",
+      "zhihu-core.mjs",
+      "md-convert.mjs",
+      "pdf.mjs"
+    ],
+    "outputPath": "dist"
+  },
+  "keywords": [
+    "zhihu",
+    "markdown",
+    "scraper",
+    "pdf"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "katex": "^0.19.1",
+    "markdown-it": "^15.0.3",
+    "puppeteer-core": "^25.18.1",
+    "turndown": "^7.2.5",
+    "turndown-plugin-gfm": "^1.0.2"
+  },
+  "devDependencies": {
+    "@yao-pkg/pkg": "^6.25.0"
+  }
+}

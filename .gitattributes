@@ -1,0 +1,5 @@
+* text=auto eol=lf
+*.vbs text eol=crlf
+*.png binary
+*.pdf binary
+package-lock.json text eol=lf

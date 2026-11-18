@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>知乎回答导出</title>
+<style>
+  :root {
+    --bg: #f4f6f9;
+    --card: #ffffff;
+    --ink: #171a1f;
+    --muted: #6b7280;
+    --line: #e5e8ee;
+    --brand: #0568d8;
+    --brand-ink: #ffffff;
+    --ok: #0f9d58;
+    --warn: #d97706;
+    --err: #dc2626;
+    --term-bg: #12161d;
+    --term-ink: #cdd6e3;
+    --radius: 12px;
+    --shadow: 0 1px 2px rgba(16,24,40,.05), 0 8px 24px rgba(16,24,40,.06);
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6;
+    display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased;
+  }
+  header {
+    padding: 20px 28px 14px; display: flex; align-items: center; gap: 12px;
+  }
+  .logo {
+    width: 34px; height: 34px; border-radius: 9px; flex: 0 0 auto;
+    background: linear-gradient(135deg, #0568d8, #22a0ff);
+    color: #fff; font-weight: 700; font-size: 17px;
+    display: grid; place-items: center;
+    box-shadow: 0 4px 12px rgba(5,104,216,.28);
+  }
+  h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .badge {
+    margin-left: auto; font-size: 12px; padding: 4px 10px; border-radius: 999px;
+    background: #eef2f7; color: var(--muted); font-weight: 600; white-space: nowrap;
+  }
+  .badge.running { background: #fff3e0; color: var(--warn); }
+  .badge.done { background: #e7f6ec; color: var(--ok); }
+  .badge.error { background: #fdeaea; color: var(--err); }
+
+  main { padding: 0 28px 24px; display: flex; flex-direction: column; gap: 14px; flex: 1; min-height: 0; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    box-shadow: var(--shadow); padding: 16px 18px;
+  }
+  .label { font-size: 12px; color: var(--muted); font-weight: 600; margin-bottom: 7px; display: block; }
+  .inputrow { display: flex; gap: 10px; }
+  input[type=text] {
+    flex: 1; min-width: 0; height: 42px; padding: 0 13px; font-size: 14px;
+    border: 1px solid var(--line); border-radius: 9px; background: #fbfcfe; color: var(--ink);
+    outline: none; transition: border-color .15s, box-shadow .15s;
+    font-family: inherit;
+  }
+  input[type=text]:focus { border-color: var(--brand); box-shadow: 0 0 0 3px rgba(5,104,216,.12); background: #fff; }
+  input[type=text]:disabled { opacity: .6; }
+  button {
+    height: 42px; padding: 0 18px; border-radius: 9px; border: 1px solid var(--line);
+    background: #fff; color: var(--ink); font-size: 14px; font-weight: 600; cursor: pointer;
+    font-family: inherit; transition: background .15s, border-color .15s, transform .06s;
+    white-space: nowrap;
+  }
+  button:hover:not(:disabled) { background: #f7f9fc; border-color: #d5dae3; }
+  button:active:not(:disabled) { transform: translateY(1px); }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  button.primary {
+    background: var(--brand); border-color: var(--brand); color: var(--brand-ink);
+    box-shadow: 0 4px 12px rgba(5,104,216,.24); min-width: 118px;
+  }
+  button.primary:hover:not(:disabled) { background: #045dc4; border-color: #045dc4; }
+  button.small { height: 34px; padding: 0 13px; font-size: 13px; }
+
+  .opts { display: flex; align-items: center; gap: 18px; margin-top: 12px; flex-wrap: wrap; }
+  .opt { display: flex; align-items: center; gap: 7px; font-size: 13px; color: #3a4250; }
+  select, input[type=number] {
+    height: 32px; padding: 0 9px; border: 1px solid var(--line); border-radius: 7px;
+    background: #fbfcfe; font-size: 13px; color: var(--ink); outline: none; font-family: inherit;
+  }
+  input[type=number] { width: 92px; }
+  input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
+
+  .term {
+    background: var(--term-bg); border-radius: var(--radius); border: 1px solid #0c1016;
+    padding: 12px 14px; color: var(--term-ink); flex: 1; min-height: 180px;
+    overflow-y: auto; font-family: "Cascadia Mono", Consolas, monospace;
+    font-size: 12.4px; line-height: 1.65; white-space: pre-wrap; word-break: break-word;
+    box-shadow: var(--shadow);
+  }
+  .term .t-ok { color: #4ade80; }
+  .term .t-err { color: #f87171; }
+  .term .t-dim { color: #7c8798; }
+  .term .t-info { color: #60a5fa; }
+  .placeholder { color: #55606f; }
+
+  .result { display: none; }
+  .result.show { display: block; }
+  .rhead { display: flex; align-items: center; gap: 9px; font-weight: 650; margin-bottom: 4px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px rgba(15,157,88,.16); }
+  .rmeta { font-size: 12.5px; color: var(--muted); margin-bottom: 12px; }
+  .path {
+    font-family: "Cascadia Mono", Consolas, monospace; font-size: 12.2px;
+    background: #f6f8fb; border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 11px; word-break: break-all; color: #2b3440; margin-bottom: 12px;
+  }
+  .actions { display: flex; gap: 9px; flex-wrap: wrap; }
+  .hint { font-size: 12px; color: var(--muted); margin-top: 10px; }
+  .err-box {
+    display: none; margin-top: 12px; padding: 11px 13px; border-radius: 9px;
+    background: #fdeaea; border: 1px solid #f5c6c6; color: #b91c1c; font-size: 13px;
+  }
+  .err-box.show { display: block; }
+  .spin {
+    display: inline-block; width: 12px; height: 12px; border: 2px solid rgba(255,255,255,.35);
+    border-top-color: #fff; border-radius: 50%; animation: sp .8s linear infinite;
+    vertical-align: -2px; margin-right: 7px;
+  }
+  @keyframes sp { to { transform: rotate(360deg); } }
+  footer {
+    padding: 0 28px 16px; font-size: 12px; color: var(--muted);
+    display: flex; gap: 14px; align-items: center;
+  }
+  footer b { color: #3a4250; font-weight: 600; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">知</div>
+  <div>
+    <h1>知乎回答导出</h1>
+    <div class="sub">粘贴知乎问题链接，导出全部回答为 Markdown / PDF</div>
+  </div>
+  <div class="badge" id="badge">就绪</div>
+</header>
+
+<main>
+  <section class="card">
+    <label class="label" for="url">知乎问题链接</label>
+    <div class="inputrow">
+      <input id="url" type="text" spellcheck="false" placeholder="https://www.zhihu.com/question/2105779343171572976">
+      <button class="primary" id="run">开始抓取</button>
+    </div>
+    <div class="opts">
+      <label class="opt">排序
+        <select id="order">
+          <option value="default">默认</option>
+          <option value="updated">最近更新</option>
+          <option value="created">按时间</option>
+        </select>
+      </label>
+      <label class="opt">最多抓取
+        <input id="limit" type="number" min="1" placeholder="全部">
+      </label>
+      <label class="opt"><input id="images" type="checkbox" checked> 下载图片到本地</label>
+      <label class="opt"><input id="pdf" type="checkbox" checked> 同时生成 PDF</label>
+    </div>
+    <div class="err-box" id="err"></div>
+  </section>
+
+  <section class="term" id="term"><span class="placeholder">等待开始……<br>首次使用会弹出浏览器窗口，扫码登录一次即可。</span></section>
+
+  <section class="card result" id="result">
+    <div class="rhead"><span class="dot"></span>导出完成</div>
+    <div class="rmeta" id="rmeta"></div>
+    <div class="path" id="rpath"></div>
+    <div class="actions">
+      <button class="small" id="openMd">打开 Markdown</button>
+      <button class="small" id="openPdf">打开 PDF</button>
+      <button class="small" id="makePdf">生成 PDF</button>
+      <button class="small" id="openFolder">打开文件夹</button>
+      <button class="small" id="copyPath">复制路径</button>
+    </div>
+    <div class="hint" id="rhint"></div>
+  </section>
+</main>
+
+<footer>
+  <span>输出目录：<b id="outdir">—</b></span>
+  <span>登录态：<b id="login">检查中…</b></span>
+</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const term = $('term');
+const badge = $('badge');
+let running = false;
+let last = null;
+
+function setBadge(text, cls) {
+  badge.textContent = text;
+  badge.className = 'badge' + (cls ? ' ' + cls : '');
+}
+
+function clearTerm() { term.innerHTML = ''; }
+
+function appendLog(line) {
+  const div = document.createElement('div');
+  const t = String(line);
+  if (/^✅|完成|✓ 登录成功|✓ 已复用/.test(t)) div.className = 't-ok';
+  else if (/^✖|失败|错误|!/.test(t)) div.className = 't-err';
+  else if (/^→|^(浏览器|  标题|  共|  文件|  回答|  图片|  PDF)/.test(t)) div.className = 't-info';
+  else if (/^\s*$/.test(t)) div.className = 't-dim';
+  div.textContent = t;
+  const stick = term.scrollTop + term.clientHeight >= term.scrollHeight - 24;
+  term.appendChild(div);
+  if (stick) term.scrollTop = term.scrollHeight;
+}
+
+function setRunning(v) {
+  running = v;
+  $('run').disabled = v;
+  $('url').disabled = v;
+  $('order').disabled = v;
+  $('limit').disabled = v;
+  $('images').disabled = v;
+  $('pdf').disabled = v;
+  $('run').innerHTML = v ? '<span class="spin"></span>抓取中…' : '开始抓取';
+}
+
+$('run').addEventListener('click', start);
+$('url').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !running) start(); });
+
+async function start() {
+  const url = $('url').value.trim();
+  if (!url) { showErr('请先粘贴知乎问题链接'); $('url').focus(); return; }
+  hideErr();
+  $('result').classList.remove('show');
+  last = null;
+
+  setRunning(true);
+  setBadge('抓取中', 'running');
+  clearTerm();
+  appendLog('开始处理：' + url);
+
+  try {
+    const res = await fetch('/api/run', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        url,
+        order: $('order').value,
+        limit: Number($('limit').value) || 0,
+        images: $('images').checked,
+        pdf: $('pdf').checked,
+      }),
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.error || '启动失败');
+  } catch (e) {
+    setRunning(false);
+    setBadge('出错', 'error');
+    showErr(String(e.message || e));
+    appendLog('✖ ' + (e.message || e));
+  }
+}
+
+function showErr(msg) { const b = $('err'); b.textContent = msg; b.classList.add('show'); }
+function hideErr() { $('err').classList.remove('show'); }
+
+function showResult(r) {
+  last = r;
+  $('rmeta').textContent = `共 ${r.answers} 条回答 · ${r.images} 张图片 · ${r.chars} 字符`;
+  $('rpath').textContent = r.md;
+  $('openPdf').style.display = r.pdf ? '' : 'none';
+  $('makePdf').style.display = r.pdf ? 'none' : '';
+  $('rhint').textContent = r.note || '';
+  $('result').classList.add('show');
+}
+
+// SSE 进度
+function connect() {
+  const es = new EventSource('/api/events');
+  es.onmessage = (ev) => {
+    let m;
+    try { m = JSON.parse(ev.data); } catch { return; }
+    if (m.type === 'log') appendLog(m.line);
+    else if (m.type === 'state') {
+      if (m.running) { setRunning(true); setBadge('抓取中', 'running'); }
+    } else if (m.type === 'done') {
+      setRunning(false);
+      setBadge('完成', 'done');
+      showResult(m.result);
+    } else if (m.type === 'error') {
+      setRunning(false);
+      setBadge('出错', 'error');
+      showErr(m.message);
+      appendLog('✖ ' + m.message);
+    }
+  };
+  es.onerror = () => { setTimeout(connect, 1500); es.close(); };
+}
+
+async function post(path, body) {
+  const r = await fetch(path, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body || {}),
+  });
+  return r.json();
+}
+
+$('openMd').onclick = () => last && post('/api/open', { type: 'md', path: last.md });
+$('openPdf').onclick = () => last && last.pdf && post('/api/open', { type: 'pdf', path: last.pdf });
+$('openFolder').onclick = () => last && post('/api/open', { type: 'folder', path: last.md });
+$('copyPath').onclick = async () => {
+  if (!last) return;
+  try { await navigator.clipboard.writeText(last.md); $('copyPath').textContent = '已复制'; setTimeout(() => $('copyPath').textContent = '复制路径', 1200); } catch { }
+};
+$('makePdf').onclick = async () => {
+  if (!last) return;
+  $('makePdf').disabled = true;
+  $('makePdf').textContent = '生成中…';
+  const r = await post('/api/pdf', { path: last.md });
+  $('makePdf').disabled = false;
+  $('makePdf').textContent = '生成 PDF';
+  if (r.ok) { last.pdf = r.pdf; $('openPdf').style.display = ''; $('makePdf').style.display = 'none'; }
+  else showErr(r.error || 'PDF 生成失败');
+};
+
+(async function init() {
+  try {
+    const r = await fetch('/api/config').then((x) => x.json());
+    $('outdir').textContent = r.outDir;
+    $('login').textContent = r.loggedIn ? '已登录' : '未登录（首次运行会提示扫码）';
+    $('login').style.color = r.loggedIn ? 'var(--ok)' : 'var(--warn)';
+  } catch { }
+  connect();
+})();
+</script>
+</body>
+</html>

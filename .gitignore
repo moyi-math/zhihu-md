@@ -1,0 +1,38 @@
+# ---------------------------------------------------------------- 依赖
+node_modules/
+package-lock.json.bak
+
+# ---------------------------------------------------------------- 构建产物
+# exe 约 67MB，不适合进 git；发布走 GitHub Releases
+dist/
+# 构建期由 make-katex-css.mjs 生成（把 KaTeX 字体内联成 base64）
+katex-inline.css
+
+# ---------------------------------------------------------------- 运行时数据
+# 登录态 / 浏览器 profile：绝对不要提交
+.zhihu-md/
+profile/
+gui-profile/
+*.cookies
+cookies.txt
+
+# 抓取导出结果
+output/
+output-*/
+assets/
+*.preview.html
+.preview-*.html
+
+# ---------------------------------------------------------------- 系统与编辑器
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+
+# ---------------------------------------------------------------- 临时文件
+*.log
+*.tmp
+*.bak
+preview-*.html
