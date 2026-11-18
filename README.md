@@ -1,5 +1,9 @@
 # 知乎回答导出
 
+[![CI](https://github.com/moyi-math/zhihu-md/actions/workflows/ci.yml/badge.svg)](https://github.com/moyi-math/zhihu-md/actions/workflows/ci.yml)
+[![Release](https://github.com/moyi-math/zhihu-md/actions/workflows/release.yml/badge.svg)](https://github.com/moyi-math/zhihu-md/actions/workflows/release.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 把知乎问题下的**全部回答**抓下来，导出为干净的 **Markdown** 和 **PDF**：公式变成 LaTeX、图片本地保存、代码块保留语言、表格/列表/引用正常。
 
 打包好的单文件 Windows 客户端，双击即用；也可以在命令行里批量调用。
@@ -19,8 +23,8 @@
 
 ### 使用（Windows）
 
-1. 从 [Releases](../../releases) 下载 `zhihu-md.exe`
-2. 双击运行 → 粘贴知乎问题链接 → 开始抓取
+1. 从 [Releases](../../releases) 下载 `zhihu-md.exe` 和 `知乎回答导出.vbs`（放同一个文件夹）
+2. 双击 `知乎回答导出.vbs`（这样不会弹命令行窗口）→ 粘贴知乎问题链接 → 开始抓取
 3. 结果在 `文档\知乎导出\`
 
 首次运行会弹出浏览器窗口，**扫码登录知乎一次**，登录态保存在 `%LOCALAPPDATA%\zhihu-md\profile`。
@@ -156,6 +160,9 @@ npm run build                                # 打包 → dist/zhihu-md.exe
 | `make-katex-css.mjs` | 构建期把 KaTeX 字体内联成 data URI |
 | `ui.html` | 图形界面（单文件，无框架） |
 | `build.mjs` | 打包成单文件 exe |
+| `.github/workflows/` | CI：push 跑单测；打 tag 自动构建 exe 并发布 Release |
+
+发版：`git tag v1.0.0 && git push --tags`，GitHub Actions 会自动构建 exe、生成 SHA256 并发布 Release。
 
 技术栈：Node.js 22+ / `puppeteer-core` / `turndown` / `markdown-it` / `katex` / `@yao-pkg/pkg`。
 

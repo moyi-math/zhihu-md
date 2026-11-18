@@ -1,0 +1,72 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: 构建 Windows exe
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 单测
+        run: npm test
+
+      - name: 打包 exe
+        run: npm run build
+
+      - name: 整理产物
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release | Out-Null
+          Copy-Item "dist/zhihu-md.exe" "release/zhihu-md.exe"
+          Copy-Item "dist/知乎回答导出.vbs" "release/知乎回答导出.vbs"
+          Get-ChildItem release | Format-Table Name, Length
+
+      - name: 计算校验和
+        shell: pwsh
+        run: |
+          Get-FileHash "release/zhihu-md.exe" -Algorithm SHA256 |
+            ForEach-Object { "$($_.Hash.ToLower())  zhihu-md.exe" } |
+            Out-File -Encoding ascii "release/SHA256SUMS.txt"
+          Get-Content "release/SHA256SUMS.txt"
+
+      - name: 发布到 Releases
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/zhihu-md.exe
+            release/知乎回答导出.vbs
+            release/SHA256SUMS.txt
+          generate_release_notes: true
+          body: |
+            ## 下载
+
+            - `zhihu-md.exe` —— 单文件客户端，双击即用（需本机已安装 Chrome 或 Edge）
+            - `知乎回答导出.vbs` —— 放在 exe 同目录，双击可隐藏命令行窗口
+
+            ## 用法
+
+            双击 `知乎回答导出.vbs` → 粘贴知乎问题链接 → 开始抓取，结果在 `文档\知乎导出\`。
+
+            首次运行需扫码登录知乎一次，登录态随后复用。
+
+            ```bash
+            # 命令行同样可用
+            zhihu-md.exe "https://www.zhihu.com/question/xxxx" --pdf -o D:\导出
+            ```
