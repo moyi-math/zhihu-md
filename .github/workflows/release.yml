@@ -51,7 +51,7 @@ jobs:
         with:
           files: |
             release/zhihu-md.exe
-            release/知乎回答导出.vbs
+            release/zhihu-md-launcher.vbs
             release/SHA256SUMS.txt
           generate_release_notes: true
           body: |
