@@ -37,3 +37,4 @@ desktop.ini
 *.bak
 preview-*.html
 .verify/
+.final/
