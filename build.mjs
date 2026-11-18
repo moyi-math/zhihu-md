@@ -53,7 +53,7 @@ if (!fs.existsSync(outFile)) {
 }
 
 // 附带一个隐藏控制台窗口的启动器（双击它就没有黑框）
-await fsp.copyFile('launcher.vbs', path.join('dist', '知乎回答导出.vbs'));
+await fsp.copyFile('launcher.vbs', path.join('dist', 'zhihu-md-launcher.vbs'));
 
 const size = (await fsp.stat(outFile)).size;
 console.log('');

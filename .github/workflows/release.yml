@@ -35,7 +35,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
           Copy-Item "dist/zhihu-md.exe" "release/zhihu-md.exe"
-          Copy-Item "dist/知乎回答导出.vbs" "release/知乎回答导出.vbs"
+          Copy-Item "dist/zhihu-md-launcher.vbs" "release/zhihu-md-launcher.vbs"
           Get-ChildItem release | Format-Table Name, Length
 
       - name: 计算校验和
@@ -58,11 +58,11 @@ jobs:
             ## 下载
 
             - `zhihu-md.exe` —— 单文件客户端，双击即用（需本机已安装 Chrome 或 Edge）
-            - `知乎回答导出.vbs` —— 放在 exe 同目录，双击可隐藏命令行窗口
+            - `zhihu-md-launcher.vbs` —— 放在 exe 同目录，双击可隐藏命令行窗口
 
             ## 用法
 
-            双击 `知乎回答导出.vbs` → 粘贴知乎问题链接 → 开始抓取，结果在 `文档\知乎导出\`。
+            把两个文件放同一目录，双击 `zhihu-md-launcher.vbs` → 粘贴知乎问题链接 → 开始抓取，结果在 `文档\知乎导出\`。
 
             首次运行需扫码登录知乎一次，登录态随后复用。
 

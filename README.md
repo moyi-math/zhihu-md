@@ -23,8 +23,8 @@
 
 ### 使用（Windows）
 
-1. 从 [Releases](../../releases) 下载 `zhihu-md.exe` 和 `知乎回答导出.vbs`（放同一个文件夹）
-2. 双击 `知乎回答导出.vbs`（这样不会弹命令行窗口）→ 粘贴知乎问题链接 → 开始抓取
+1. 从 [Releases](../../releases) 下载 `zhihu-md.exe` 和 `zhihu-md-launcher.vbs`（放同一个文件夹）
+2. 双击 `zhihu-md-launcher.vbs`（这样不会弹命令行窗口）→ 粘贴知乎问题链接 → 开始抓取
 3. 结果在 `文档\知乎导出\`
 
 首次运行会弹出浏览器窗口，**扫码登录知乎一次**，登录态保存在 `%LOCALAPPDATA%\zhihu-md\profile`。
