@@ -137,11 +137,12 @@ fetched_at: "2026-11-18 21:01"
 | 代码块 `pre[lang]` / `code.language-x` | 保留语言标注 |
 | 表格 / 删除线 | GFM 插件 + 自定义 `~~` 规则 |
 
-### 5. 打包成单文件 exe 的三个坑
+### 5. 打包成单文件 exe 的坑
 
 - pkg 的 snapshot **不支持动态 `import()`** → 所有模块静态导入
 - 打包后 CJS 依赖的 `default` 导入会变 `undefined` → 统一用 `createRequire` 加载
 - snapshot 里的 KaTeX 字体，Chrome 作为外部进程**读不到** → 构建期把 woff2 内联成 base64（`make-katex-css.mjs`）
+- 内联字体时正则写错会**静默毁掉 20 个 `@font-face`**：`src:\s*([^;]+);` 里的 `[^;]+` 会跨过 `}` 一直吃到下一个 `@font-face` 的 `font-weight:700;`，把 20 条字体规则的首尾拼进同一个 `@font-face`。CSS 只认最后一条 `font-family`，其余 11 个字体族（包括控制大号积分号/求和号的 `KaTeX_Size2`）全部回退到普通字体——公式结构还在，只是**积分号缩小、上下限挤到右边、分式看着被压扁**，与 textstyle 几乎没差别，极易误判成「渲染器不支持 displaystyle」。现在生成后会自检 `@font-face` 数量必须等于内联字体数，不等直接报错
 
 此外 `page.evaluate` 的函数回调改成字符串脚本，避免打包转换改写函数源码。
 
