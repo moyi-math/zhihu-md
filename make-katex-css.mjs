@@ -26,7 +26,7 @@ export function buildKatexInlineCss() {
 
   // font-face 里通常是：src:url(fonts/A.woff2) format("woff2"),url(fonts/A.woff) format("woff"),...
   // 只保留 woff2 并内联，其余格式删掉
-  css = css.replace(/src:\s*([^;]+);/g, (whole, srcList) => {
+  css = css.replace(/src:\s*([^;}]+)([;}])/g, (whole, srcList, term) => {
     const entries = srcList.split(',').map((s) => s.trim());
     const woff2 = entries.find((s) => /\.woff2/.test(s));
     if (!woff2) return whole;
@@ -38,7 +38,7 @@ export function buildKatexInlineCss() {
     try {
       const buf = fs.readFileSync(file);
       inlined++;
-      return `src:url(data:font/woff2;base64,${buf.toString('base64')}) format("woff2");`;
+      return `src:url(data:font/woff2;base64,${buf.toString('base64')}) format("woff2")${term}`;
     } catch {
       return whole;
     }
@@ -46,6 +46,19 @@ export function buildKatexInlineCss() {
 
   // 兜底：把全文里残余的 url(fonts/...) 去掉（避免运行时 404 噪音）
   css = css.replace(/url\(fonts\/[^)]+\)(\s*format\("[^"]+"\))?,?/g, '');
+
+  // 结构自检：每个内联字体必须落在自己的 @font-face 里。
+  // 曾经踩过坑——src 的 [^;]+ 会跨过 } 一直吃到下一个 @font-face 的 font-weight:700;，
+  // 于是 20 个字体只剩 1 个 @font-face 生效，积分号/求和号静默退化成普通字体（看着就是"公式变小"）。
+  const faceCount = (css.match(/@font-face/g) || []).length;
+  if (faceCount !== inlined) {
+    throw new Error(
+      `KaTeX 样式结构异常：内联了 ${inlined} 个字体，但只有 ${faceCount} 个 @font-face，字体规则被破坏`
+    );
+  }
+  if (css.includes('url(fonts/')) {
+    throw new Error('KaTeX 样式里仍残留 url(fonts/...)，打包后 Chrome 会 404');
+  }
 
   fs.writeFileSync(outPath, css, 'utf8');
   const sizeKB = Math.round(fs.statSync(outPath).size / 1024);
