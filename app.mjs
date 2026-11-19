@@ -147,6 +147,7 @@ async function runGui() {
       }
 
       job.result = {
+        title: out.title || '',
         md: out.markdownPath,
         pdf: pdfPath,
         answers: out.answers,
@@ -273,7 +274,11 @@ async function runGui() {
     try {
       if (url.pathname === '/' || url.pathname === '/index.html') {
         const html = await fsp.readFile(assetPath('ui.html'));
-        res.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
+        res.writeHead(200, {
+          'content-type': 'text/html; charset=utf-8',
+          // 界面会随版本更新，禁止缓存，避免用户看到旧 UI
+          'cache-control': 'no-store, must-revalidate',
+        });
         return res.end(html);
       }
 

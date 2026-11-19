@@ -61,8 +61,10 @@ export function findBrowser() {
  * 启动持久化浏览器（登录态保存在 userDataDir）
  * @returns {{browser, page, cookiesHeader: () => Promise<string>, ua: () => string, close: () => Promise<void>}}
  */
-export async function launchBrowser({ profileDir, headless = false, width = 1400, height = 950, onLog = () => { } }) {
-  const found = findBrowser();
+export async function launchBrowser({ profileDir, headless = false, width = 1400, height = 950, browserPath = '', onLog = () => { } }) {
+  const found = browserPath
+    ? { path: browserPath, name: path.basename(browserPath).replace(/\.exe$/i, '') }
+    : findBrowser();
   if (!found) {
     throw new Error('没找到 Chrome / Edge。请先安装 Google Chrome 后重试。');
   }

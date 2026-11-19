@@ -12,11 +12,61 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+const requireCjs = createRequire(import.meta.url);
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 process.chdir(here);
 
 const target = process.env.TARGET || 'node22-win-x64';
+const pkgVersion = JSON.parse(fs.readFileSync('package.json', 'utf8')).version;
+
+/**
+ * pkg 不支持自定义图标，所以打包完再改 PE 资源：
+ *  - 应用图标（来自 icon.ico）
+ *  - 版本信息（资源管理器「属性 → 详细信息」里能看到产品名/版本/版权）
+ */
+function applyWinResources(exePath, { icoPath, version, productName, description, company, copyright }) {
+  const { NtExecutable, NtExecutableResource, Data, Resource } = requireCjs('resedit');
+  const exe = NtExecutable.from(fs.readFileSync(exePath), { ignoreCert: true });
+  const res = NtExecutableResource.from(exe);
+
+  // 图标
+  const iconFile = Data.IconFile.from(fs.readFileSync(icoPath));
+  Resource.IconGroupEntry.replaceIconsForResource(
+    res.entries,
+    1,
+    1033,
+    iconFile.icons.map((i) => i.data)
+  );
+
+  // 版本信息（没有就新建）
+  const [maj, min, pat] = version.split('.').map((n) => Number(n) || 0);
+  let vi = Resource.VersionInfo.fromEntries(res.entries)[0];
+  if (!vi) {
+    vi = Resource.VersionInfo.createEmpty();
+  }
+  vi.setStringValues(
+    { lang: 1033, codepage: 1200 },
+    {
+      ProductName: productName,
+      FileDescription: description,
+      CompanyName: company,
+      LegalCopyright: copyright,
+      OriginalFilename: path.basename(exePath),
+      InternalName: path.basename(exePath, '.exe'),
+      FileVersion: version,
+      ProductVersion: version,
+    }
+  );
+  vi.setFileVersion(maj, min, pat, 0);
+  vi.setProductVersion(maj, min, pat, 0);
+  vi.outputToResourceEntries(res.entries);
+
+  res.outputResource(exe);
+  fs.writeFileSync(exePath, Buffer.from(exe.generate()));
+}
 const outFile = path.join('dist', 'zhihu-md.exe');
 
 await fsp.mkdir('dist', { recursive: true });
@@ -50,6 +100,24 @@ try {
 if (!fs.existsSync(outFile)) {
   console.error('✖ 未生成 exe');
   process.exit(1);
+}
+
+// 注入图标与版本信息
+const icoPath = path.join(here, 'icon.ico');
+if (fs.existsSync(icoPath)) {
+  try {
+    applyWinResources(outFile, {
+      icoPath,
+      version: pkgVersion,
+      productName: '知乎回答导出',
+      description: '知乎回答导出 - 把知乎问题的全部回答导出为 Markdown / PDF',
+      company: 'moyi-math',
+      copyright: 'MIT License © moyi-math',
+    });
+    console.log(`→ 已注入图标与版本信息 (v${pkgVersion})`);
+  } catch (err) {
+    console.error(`! 注入图标失败（不影响功能）：${err.message}`);
+  }
 }
 
 // 附带一个隐藏控制台窗口的启动器（双击它就没有黑框）

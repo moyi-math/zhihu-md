@@ -17,7 +17,7 @@
 - **PDF 排版** —— KaTeX 渲染公式、图片 base64 内嵌（PDF 自包含）、A4 分页、公式/表格/代码块避免跨页截断
 - **扫码登录一次** —— 登录态持久化，之后无需重复登录
 - **不依赖 API 签名** —— 在真实页面里取数据（见下方「实现原理」），知乎改签名算法也不受影响
-- **单文件 exe** —— 67 MB，不捆绑浏览器（复用本机 Chrome / Edge）
+- **单文件 exe** —— 67 MB，不捆绑浏览器（复用本机 Chrome / Edge），带自定义图标与版本信息
 
 ## 快速开始
 
@@ -137,6 +137,10 @@ fetched_at: "2026-11-18 21:01"
 
 此外 `page.evaluate` 的函数回调改成字符串脚本，避免打包转换改写函数源码。
 
+**图标与版本信息**：pkg 没有 `--icon` 参数，所以打包完成后再用 `resedit` 改 PE 资源——写入 `icon.ico`（16~256 多尺寸）以及产品名、版本号、版权，这样资源管理器「属性 → 详细信息」和任务管理器里都能看到正确的程序身份。
+
+> 注意：GUI 窗口是 Chrome 的 `--app` 模式打开的，**任务栏图标显示的是浏览器图标**（这是无 Electron 方案换取 67MB 体积的代价）；exe 本身的图标（资源管理器、开始菜单、快捷方式）是自定义的。
+
 ## 开发
 
 ```bash
@@ -159,7 +163,8 @@ npm run build                                # 打包 → dist/zhihu-md.exe
 | `pdf.mjs` | Markdown → PDF（KaTeX + Chrome 打印） |
 | `make-katex-css.mjs` | 构建期把 KaTeX 字体内联成 data URI |
 | `ui.html` | 图形界面（单文件，无框架） |
-| `build.mjs` | 打包成单文件 exe |
+| `build.mjs` | 打包成单文件 exe（含图标与版本信息注入）|
+| `icon.ico` / `assets-src/` | 应用图标（多尺寸）与 512px 源图 |
 | `test-md-convert.mjs` | 转换层单测（公式/图片/外链/标题/代码块/表格等 11 个用例）|
 | `.github/workflows/` | CI：push 跑单测；打 tag 自动构建 exe 并发布 Release |
 

@@ -1,6 +1,6 @@
 {
   "name": "zhihu-md",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "知乎问题回答导出为 Markdown / PDF 的桌面客户端",
   "type": "module",
   "bin": {
@@ -39,6 +39,7 @@
     "katex": "^0.19.1",
     "markdown-it": "^15.0.3",
     "puppeteer-core": "^25.18.1",
+    "resedit": "^3.1.1",
     "turndown": "^7.2.5",
     "turndown-plugin-gfm": "^1.0.2"
   },
