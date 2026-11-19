@@ -31,6 +31,14 @@
 
 > 需要本机装有 Chrome 或 Edge（抓取和 PDF 渲染都要用真实浏览器）。
 
+### 输出目录
+
+界面里「保存到」一行可以直接改：手动输入路径（回车或点其他位置生效），或点「浏览…」用系统文件夹选择框。
+
+- 目录不存在会自动创建，不可写/是文件/相对路径会被拒绝并回滚
+- 配置保存在 `%LOCALAPPDATA%\zhihu-md\config.json`，下次启动沿用
+- 命令行模式仍然用独立的 `-o/--out` 参数，不读这个配置
+
 ### 命令行
 
 ```bash
@@ -161,6 +169,7 @@ npm run build                                # 打包 → dist/zhihu-md.exe
 | `browser.mjs` | 定位系统 Chrome/Edge、启动（puppeteer-core）、图片下载 |
 | `md-convert.mjs` | 知乎 HTML → Markdown（公式/图片/外链/标题层级），有单测 |
 | `pdf.mjs` | Markdown → PDF（KaTeX + Chrome 打印） |
+| `config.mjs` | 用户配置：输出目录的校验与持久化 |
 | `make-katex-css.mjs` | 构建期把 KaTeX 字体内联成 data URI |
 | `ui.html` | 图形界面（单文件，无框架） |
 | `build.mjs` | 打包成单文件 exe（含图标与版本信息注入）|

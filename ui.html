@@ -123,6 +123,25 @@
   input[type=number] { width: 96px; }
   input[type=checkbox] { width: 15px; height: 15px; accent-color: var(--brand); cursor: pointer; }
 
+  /* ---------- 保存目录 ---------- */
+  .saveas {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 13px; padding-top: 13px; border-top: 1px dashed var(--line);
+  }
+  .saveas .lb { font-size: 12px; color: var(--muted); font-weight: 600; white-space: nowrap; }
+  .saveas input {
+    flex: 1; min-width: 0; height: 34px; padding: 0 10px; font-size: 12.5px;
+    font-family: "Cascadia Mono", Consolas, monospace;
+    border: 1px solid var(--line); border-radius: 8px; background: #fbfcfe; color: var(--ink-2);
+    outline: none; transition: border-color .15s, box-shadow .15s;
+  }
+  .saveas input:hover:not(:disabled) { border-color: #d3dae5; }
+  .saveas input:focus { border-color: var(--brand); box-shadow: var(--ring); background: #fff; }
+  .saveas input:disabled { opacity: .6; }
+  .saveas button { height: 34px; }
+  .saveas .hint-ok { font-size: 12px; color: var(--ok); white-space: nowrap; }
+  .saveas .hint-bad { font-size: 12px; color: var(--err); white-space: nowrap; }
+
   /* ---------- steps ---------- */
   .steps { display: flex; align-items: center; gap: 0; padding: 2px 2px 0; overflow: hidden; }
   .step { display: flex; align-items: center; flex: 0 0 auto; gap: 0; }
@@ -254,6 +273,12 @@
       <label class="opt"><input id="images" type="checkbox" checked> 下载图片到本地</label>
       <label class="opt"><input id="pdf" type="checkbox" checked> 同时生成 PDF</label>
     </div>
+    <div class="saveas">
+      <span class="lb">保存到</span>
+      <input id="outDir" type="text" spellcheck="false" placeholder="D:\知乎导出">
+      <button class="small" id="pickDir" title="打开系统文件夹选择框">浏览…</button>
+      <span id="dirHint"></span>
+    </div>
     <div class="field-err" id="fieldErr"></div>
   </section>
 
@@ -300,8 +325,6 @@
 </main>
 
 <footer>
-  <span>输出目录：<b id="outdir">…</b></span>
-  <span class="sep">|</span>
   <span>登录态：<b id="login">检查中…</b></span>
   <span class="sep">|</span>
   <span>版本 <b id="ver">—</b></span>
@@ -335,6 +358,8 @@ function setRunning(v) {
   $('limit').disabled = v;
   $('images').disabled = v;
   $('pdf').disabled = v;
+  $('outDir').disabled = v;
+  $('pickDir').disabled = v;
   $('run').innerHTML = v ? '<span class="spin"></span>抓取中…' : '开始抓取';
 }
 
@@ -508,6 +533,68 @@ function connect() {
   es.onerror = () => { setTimeout(connect, 1500); es.close(); };
 }
 
+/* ---------------- 保存目录 ---------------- */
+
+function setDirHint(text, ok) {
+  const h = $('dirHint');
+  h.textContent = text || '';
+  h.className = text ? (ok ? 'hint-ok' : 'hint-bad') : '';
+  if (text) setTimeout(() => { if ($('dirHint').textContent === text) setDirHint(''); }, 2200);
+}
+
+async function applyOutDir(dir, { silent = false } = {}) {
+  try {
+    const r = await post('/api/setOutDir', { dir });
+    if (!r.ok) {
+      if (!silent) setDirHint(r.error || '设置失败', false);
+      return false;
+    }
+    $('outDir').value = r.dir;
+    if (!silent) setDirHint('已保存', true);
+    return true;
+  } catch (e) {
+    if (!silent) setDirHint('设置失败：' + (e.message || e), false);
+    return false;
+  }
+}
+
+$('pickDir').onclick = async () => {
+  const btn = $('pickDir');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '选择中…';
+  try {
+    const r = await post('/api/pickDir', {});
+    if (r.ok) {
+      $('outDir').value = r.dir;
+      setDirHint('已保存', true);
+    } else if (r.canceled) {
+      // 用户关掉了对话框，什么都不做
+    } else {
+      setDirHint(r.error || '选择失败', false);
+    }
+  } catch (e) {
+    setDirHint('选择失败：' + (e.message || e), false);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+};
+
+// 手动编辑：回车或失焦时保存；失败则回滚到原值
+let savedDir = '';
+$('outDir').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); $('outDir').blur(); }
+});
+$('outDir').addEventListener('focus', () => { savedDir = $('outDir').value; });
+$('outDir').addEventListener('blur', async () => {
+  const val = $('outDir').value.trim();
+  if (!val || val === savedDir) return;
+  const ok = await applyOutDir(val);
+  if (!ok) $('outDir').value = savedDir;
+  else savedDir = $('outDir').value;
+});
+
 /* ---------------- 操作 ---------------- */
 
 async function post(path, body) {
@@ -571,7 +658,7 @@ $('makePdf').onclick = async () => {
   resetSteps();
   try {
     const r = await fetch('/api/config', { headers: AUTH }).then((x) => x.json());
-    $('outdir').textContent = r.outDir;
+    $('outDir').value = r.outDir || '';
     $('login').textContent = r.loggedIn ? '已登录' : '未登录（首次运行会提示扫码）';
     $('login').style.color = r.loggedIn ? 'var(--ok)' : 'var(--warn)';
     if (r.version) $('ver').textContent = 'v' + r.version;

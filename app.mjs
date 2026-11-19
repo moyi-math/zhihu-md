@@ -33,12 +33,14 @@ import {
 } from './zhihu-core.mjs';
 import { markdownToPdf } from './pdf.mjs';
 import { runCli } from './cli.mjs';
+import { loadConfig, saveConfig, resolveOutDir } from './config.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const APP_DATA = BASE_DIR || path.join(os.homedir(), '.zhihu-md');
 const PROFILE_DIR = DEFAULT_PROFILE || path.join(APP_DATA, 'profile');
 const GUI_PROFILE_DIR = path.join(APP_DATA, 'gui-profile');
-const OUT_DIR = DEFAULT_OUT_DIR || path.join(os.homedir(), 'Documents', '知乎导出');
+// 输出目录可在界面里改，存到 config.json；首次运行用默认值
+let outDir = loadConfig().outDir || DEFAULT_OUT_DIR || path.join(os.homedir(), 'Documents', '知乎导出');
 const LOCK_FILE = path.join(APP_DATA, 'instance.json');
 const FALLBACK_VERSION = '1.0.1';
 
@@ -125,7 +127,7 @@ async function runGui() {
       const out = await exportQuestion({
         session,
         qid,
-        outDir: OUT_DIR,
+        outDir,
         order: opts.order || 'default',
         limit: Math.max(0, Number(opts.limit) || 0),
         images: opts.images !== false,
@@ -170,7 +172,7 @@ async function runGui() {
 
   function withinOutDir(target) {
     try {
-      const root = path.resolve(OUT_DIR) + path.sep;
+      const root = path.resolve(outDir) + path.sep;
       const p = path.resolve(String(target || ''));
       return p.startsWith(root);
     } catch {
@@ -209,6 +211,48 @@ async function runGui() {
     } catch {
       return false;
     }
+  }
+
+  /* ---------------- 目录选择框 ---------------- */
+
+  function pickDirectory() {
+    return new Promise((resolve, reject) => {
+      if (process.platform !== 'win32') {
+        // 非 Windows 没有现成对话框，让用户手动填
+        return resolve('');
+      }
+      const outFile = path.join(os.tmpdir(), `zmd-pick-${Date.now()}.txt`);
+      const script = [
+        'Add-Type -AssemblyName System.Windows.Forms',
+        'Add-Type -AssemblyName System.Drawing',
+        '$owner = New-Object System.Windows.Forms.Form',
+        '$owner.TopMost = $true',
+        '$owner.ShowInTaskbar = $false',
+        '$owner.FormBorderStyle = "None"',
+        '$owner.Size = New-Object System.Drawing.Size(1,1)',
+        '$owner.StartPosition = "CenterScreen"',
+        '$d = New-Object System.Windows.Forms.FolderBrowserDialog',
+        '$d.Description = "选择知乎导出的保存目录"',
+        '$d.ShowNewFolderButton = $true',
+        `if ($d.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) { [System.IO.File]::WriteAllText('${outFile}', $d.SelectedPath, [System.Text.Encoding]::UTF8) }`,
+        '$owner.Dispose()',
+      ].join('; ');
+
+      const child = spawn(
+        'powershell',
+        ['-STA', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
+        { windowsHide: true }
+      );
+      child.on('error', reject);
+      child.on('close', () => {
+        let picked = '';
+        try {
+          picked = fs.readFileSync(outFile, 'utf8').trim();
+        } catch { /* 用户取消 */ }
+        try { fs.unlinkSync(outFile); } catch { /* ignore */ }
+        resolve(picked);
+      });
+    });
   }
 
   /* ---------------- HTTP ---------------- */
@@ -284,7 +328,7 @@ async function runGui() {
 
       if (url.pathname === '/api/config') {
         return sendJson(res, {
-          outDir: OUT_DIR,
+          outDir,
           loggedIn: loginHint(),
           version: VERSION,
         });
@@ -342,6 +386,30 @@ async function runGui() {
         }
       }
 
+      if (url.pathname === '/api/setOutDir' && req.method === 'POST') {
+        const body = await readBody(req);
+        if (job.running) return sendJson(res, { ok: false, error: '抓取进行中，暂不能修改输出目录' });
+        const r = resolveOutDir(body.dir);
+        if (!r.ok) return sendJson(res, { ok: false, error: r.error });
+        outDir = r.dir;
+        saveConfig({ outDir });
+        return sendJson(res, { ok: true, dir: outDir });
+      }
+
+      if (url.pathname === '/api/pickDir' && req.method === 'POST') {
+        try {
+          const picked = await pickDirectory();
+          if (!picked) return sendJson(res, { ok: false, canceled: true });
+          const r = resolveOutDir(picked);
+          if (!r.ok) return sendJson(res, { ok: false, error: r.error });
+          outDir = r.dir;
+          saveConfig({ outDir });
+          return sendJson(res, { ok: true, dir: outDir });
+        } catch (err) {
+          return sendJson(res, { ok: false, error: err.message || String(err) });
+        }
+      }
+
       if (url.pathname === '/api/open' && req.method === 'POST') {
         const body = await readBody(req);
         const ok = openTarget(body.type, body.path);
@@ -358,7 +426,7 @@ async function runGui() {
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = server.address().port;
   const pageUrl = `http://127.0.0.1:${port}/?t=${TOKEN}`;
-  fs.mkdirSync(OUT_DIR, { recursive: true });
+  fs.mkdirSync(outDir, { recursive: true });
 
   /* ---------------- 单实例：已有实例则直接开窗口给它 ---------------- */
 
@@ -378,7 +446,7 @@ async function runGui() {
   console.log(`  知乎回答导出 v${VERSION}`);
   console.log('  ─────────────────────────────');
   console.log(`  界面地址: ${pageUrl.replace(/t=[0-9a-f]+/, 't=***')}`);
-  console.log(`  输出目录: ${OUT_DIR}`);
+  console.log(`  输出目录: ${outDir}`);
   console.log(`  登录态:   ${PROFILE_DIR}`);
   console.log('');
 
