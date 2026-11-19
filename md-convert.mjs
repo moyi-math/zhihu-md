@@ -25,8 +25,45 @@ function resetMath() {
   mathStore = [];
 }
 
+/**
+ * 这些命令在 textstyle 下会明显变形：分式压扁、积分/求和号缩小、
+ * 上下限被挤到右边、binom 退化成小括号。只有含它们的行内公式才值得加 displaystyle。
+ */
+const DISPLAY_SENSITIVE = new RegExp(
+  '\\\\(' +
+    [
+      'frac', 'dfrac', 'tfrac',
+      'int', 'iint', 'iiint', 'oint',
+      'sum', 'prod', 'coprod',
+      'lim', 'limsup', 'liminf',
+      'binom', 'dbinom', 'tbinom',
+      'over', 'choose', 'atop',
+    ].join('|') +
+    // 用负向先行断言而不是 \b：\int_0、\sum_{n} 里命令后紧跟的是单词字符（下划线），
+    // \b 在这些位置不成立，会漏掉最简单的积分/求和使用场景
+    ')(?![a-zA-Z])'
+);
+
+/**
+ * 行内公式默认按 textstyle 排（分式压扁、积分号缩小、上下限挤在右边），
+ * 知乎上的式子大多按「独立公式」的写法，行内排出来会很难看。
+ * 所以对含分式/积分/求和等命令的行内公式加 \displaystyle；纯符号（$t$、$x\in\mathbb Z$）
+ * 保持原样，避免无谓撑高行距、也让 md 文件更干净。
+ * 块级公式（$$…$$）本身就是 displaystyle，不需要加。
+ */
+function withDisplayStyle(tex) {
+  const body = String(tex || '').trim();
+  if (!body) return body;
+  // 已经手动指定过，或是自带排版的环境（aligned / cases / matrix…），不要重复加
+  if (/\\displaystyle/.test(body)) return body;
+  if (/^\\begin\{/.test(body)) return body;
+  if (!DISPLAY_SENSITIVE.test(body)) return body;
+  return `\\displaystyle ${body}`;
+}
+
 function pushMath(tex, display = false) {
-  const idx = mathStore.push(display ? `$$\n${tex.trim()}\n$$` : `$${tex.trim()}$`) - 1;
+  const body = display ? String(tex || '').trim() : withDisplayStyle(tex);
+  const idx = mathStore.push(display ? `$$\n${body}\n$$` : `$${body}$`) - 1;
   return `${MATH_OPEN}${idx}${MATH_CLOSE}`;
 }
 

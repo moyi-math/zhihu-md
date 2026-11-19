@@ -95,6 +95,30 @@ chunks.push([
   },
 ]);
 
+chunks.push([
+  '行内分式自动加 displaystyle',
+  '<p><img eeimg="1" src="https://www.zhihu.com/equation?tex=%5Cfrac%7Ba%7D%7Bb%7D"></p>',
+  (md) => assert.ok(md.includes('\\displaystyle'), '分式应加 displaystyle'),
+]);
+
+chunks.push([
+  '带下标的积分也加 displaystyle（曾因 \\b 词边界漏判）',
+  '<p><img eeimg="1" src="https://www.zhihu.com/equation?tex=%5Cint_0%5E1%20f(x)%20dx"></p>',
+  (md) => assert.ok(md.includes('\\displaystyle'), '积分应加 displaystyle'),
+]);
+
+chunks.push([
+  '纯符号行内公式保持原样（不撑行距）',
+  '<p><img eeimg="1" src="https://www.zhihu.com/equation?tex=t"></p>',
+  (md) => assert.ok(!md.includes('\\displaystyle'), '纯符号不应加'),
+]);
+
+chunks.push([
+  '块级公式不重复加 displaystyle',
+  '<p><img eeimg="2" src="https://www.zhihu.com/equation?tex=%5Cfrac%7Ba%7D%7Bb%7D"></p>',
+  (md) => assert.ok(!md.includes('\\displaystyle'), '块级本身已是 displaystyle'),
+]);
+
 let failed = 0;
 for (const [name, html, check] of chunks) {
   try {
